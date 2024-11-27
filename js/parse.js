@@ -187,6 +187,15 @@ export function parseMTL(text) {
     Ni(parts) {
       material.opticalDensity = parseFloat(parts[0]);
     },
+    map_Kd(parts, unparsedArgs) {
+      material.diffuseMap = parseMapArgs(unparsedArgs);
+    },
+    map_Ns(parts, unparsedArgs) {
+      material.specularMap = parseMapArgs(unparsedArgs);
+    },
+    map_Bump(parts, unparsedArgs) {
+      material.normalMap = parseMapArgs(unparsedArgs);
+    },
     d(parts) {
       material.opacity = parseFloat(parts[0]);
     },

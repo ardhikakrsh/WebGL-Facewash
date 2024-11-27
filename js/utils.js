@@ -28,7 +28,3 @@ export function getGeometriesExtents(geometries) {
     }
   );
 }
-
-export function degToRad(deg) {
-  return (deg * Math.PI) / 180;
-}

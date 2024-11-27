@@ -3,9 +3,10 @@
 // This is not a full .obj parser.
 // see http://paulbourke.net/dataformats/obj/
 
-import { parseMTL, parseMapArgs, parseOBJ } from "/js/parse.js";
+import { parseOBJ, parseMapArgs, parseMTL } from "/js/parse.js";
+import { create1PixelTexture, createTexture } from "/js/texture.js";
+import { getExtents, getGeometriesExtents } from "/js/utils.js";
 import { vs, fs } from "/js/shaders.js";
-import { getExtents, getGeometriesExtents, degToRad } from "/js/utils.js";
 
 async function main() {
   // Get A WebGL context
@@ -19,9 +20,10 @@ async function main() {
   // compiles and links the shaders, looks up attribute and uniform locations
   const meshProgramInfo = webglUtils.createProgramInfo(gl, [vs, fs]);
 
-  const objHref = "/resources/skintific.obj";
+  const objHref = "/resources/skintific6.obj";
   const response = await fetch(objHref);
   const text = await response.text();
+
   const obj = parseOBJ(text);
   const baseHref = new URL(objHref, window.location.href);
   const matTexts = await Promise.all(
@@ -33,43 +35,56 @@ async function main() {
   );
   const materials = parseMTL(matTexts.join("\n"));
 
+  // Load textures asynchronously
+  const textures = {
+    label: await createTexture(gl, "/resources/label.png"),
+    defaultWhite: create1PixelTexture(gl, [255, 255, 255, 255]),
+  };
+
+  // Apply textures to materials
+  for (const material of Object.values(materials)) {
+    Object.entries(material)
+      .filter(([key]) => key.endsWith("Map"))
+      .forEach(([key, filename]) => {
+        let texture = textures[filename];
+        if (!texture) {
+          texture = textures.label; // Default to wood texture if none found
+          textures[filename] = texture;
+        }
+        material[key] = texture;
+      });
+  }
+
+  Object.values(materials).forEach((m) => {
+    m.shininess = 25;
+    m.specular = [1, 1, 1];
+  });
+
   const defaultMaterial = {
     diffuse: [1, 1, 1],
+    diffuseMap: textures.defaultWhite,
     ambient: [0, 0, 0],
     specular: [1, 1, 1],
+    specularMap: textures.defaultWhite,
     shininess: 400,
     opacity: 1,
   };
 
-  const parts = obj.geometries.map(({ material, data }) => {
-    // Because data is just named arrays like this
-    //
-    // {
-    //   position: [...],
-    //   texcoord: [...],
-    //   normal: [...],
-    // }
-    //
-    // and because those names match the attributes in our vertex
-    // shader we can pass it directly into `createBufferInfoFromArrays`
-    // from the article "less code more fun".
-
+  const parts = obj.geometries.map(({ material, data }, index) => {
     if (data.color) {
       if (data.position.length === data.color.length) {
-        // it's 3. The our helper library assumes 4 so we need
-        // to tell it there are only 3.
         data.color = { numComponents: 3, data: data.color };
       }
     } else {
-      // there are no vertex colors so just use constant white
       data.color = { value: [1, 1, 1, 1] };
     }
 
-    // create a buffer for each array by calling
-    // gl.createBuffer, gl.bindBuffer, gl.bufferData
     const bufferInfo = webglUtils.createBufferInfoFromArrays(gl, data);
     return {
-      material: materials[material],
+      material: {
+        ...defaultMaterial,
+        ...materials[material],
+      },
       bufferInfo,
     };
   });
@@ -92,18 +107,19 @@ async function main() {
   const zFar = radius * 3;
 
   function render(time) {
-    time *= 0.001; // convert to seconds
+    time *= 0.001;
 
     webglUtils.resizeCanvasToDisplaySize(gl.canvas);
     gl.viewport(0, 0, gl.canvas.width, gl.canvas.height);
     gl.enable(gl.DEPTH_TEST);
 
-    const fieldOfViewRadians = degToRad(60);
+    const fieldOfViewRadians = (60 * Math.PI) / 180;
     const aspect = gl.canvas.clientWidth / gl.canvas.clientHeight;
     const projection = m4.perspective(fieldOfViewRadians, aspect, zNear, zFar);
 
     const up = [0, 1, 0];
     // Compute the camera's matrix using look at.
+
     const camera = m4.lookAt(cameraPosition, cameraTarget, up);
 
     // Make a view matrix from the camera matrix.
@@ -130,13 +146,7 @@ async function main() {
       // calls gl.bindBuffer, gl.enableVertexAttribArray, gl.vertexAttribPointer
       webglUtils.setBuffersAndAttributes(gl, meshProgramInfo, bufferInfo);
       // calls gl.uniform
-      webglUtils.setUniforms(
-        meshProgramInfo,
-        {
-          u_world,
-        },
-        material
-      );
+      webglUtils.setUniforms(meshProgramInfo, { u_world }, material);
       // calls gl.drawArrays or gl.drawElements
       webglUtils.drawBufferInfo(gl, bufferInfo);
     }
